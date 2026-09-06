@@ -2,3 +2,7 @@
 build/
 .idea/
 *.iml
+key.properties
+android/app/*.jks
+android/app/*.keystore
+android/key.properties
