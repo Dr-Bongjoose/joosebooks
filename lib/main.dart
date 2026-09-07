@@ -25,16 +25,46 @@ Future<void> main() async {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   final dir = await getApplicationSupportDirectory();
-  final db = await openDatabase(p.join(dir.path, 'joosebooks.db'), version: 1,
-      onCreate: (db, v) => db.execute('''
-        CREATE TABLE IF NOT EXISTS entries (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          ts INTEGER NOT NULL,
-          amount_cents INTEGER NOT NULL,
-          kind TEXT NOT NULL,
-          category TEXT NOT NULL DEFAULT 'Other',
-          note TEXT DEFAULT ''
-        )'''));
+  final db = await openDatabase(p.join(dir.path, 'joosebooks.db'), version: 2,
+      onCreate: (db, v) async {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            amount_cents INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'Other',
+            note TEXT DEFAULT '',
+            profile_id INTEGER DEFAULT 0
+          )''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            entity TEXT DEFAULT '',
+            created_ts INTEGER NOT NULL
+          )''');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_entries_profile ON entries(profile_id, ts)');
+      },
+      onUpgrade: (db, oldV, newV) async {
+        if (oldV < 2) {
+          // Guarded ALTER: pre-profile installs add the column; old entries stay
+          // Personal (0). Never moves or deletes anyone's data.
+          try {
+            await db.execute('ALTER TABLE entries ADD COLUMN profile_id INTEGER DEFAULT 0');
+          } catch (_) {}
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS profiles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              entity TEXT DEFAULT '',
+              created_ts INTEGER NOT NULL
+            )''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_entries_profile ON entries(profile_id, ts)');
+        }
+      });
   final debugAddSheet = Platform.environment['JOOSBOOKS_DEBUG'] == 'add-sheet';
   runApp(JooseBooksApp(db: db, debugAddSheet: debugAddSheet));
 }
@@ -70,6 +100,8 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   late int year = DateTime.now().year;
+  int profileId = 0; // selected business profile (0 = Personal)
+  List<Map<String, Object?>> profiles = [];
   Map<String, double>? summary;
   String? monthLine;
   List<Map<String, Object?>> entries = [];
@@ -86,10 +118,13 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _refresh() async {
+    // Load profiles + all queries scoped to the selected profile (per-pile numbers).
+    profiles = await widget.db.query('profiles', orderBy: 'id');
     final startY = DateTime(year).millisecondsSinceEpoch ~/ 1000;
     final endY = DateTime(year + 1).millisecondsSinceEpoch ~/ 1000;
     final rows = await widget.db.query('entries',
-        where: 'ts >= ? AND ts < ?', whereArgs: [startY, endY], orderBy: 'ts DESC');
+        where: 'ts >= ? AND ts < ? AND profile_id = ?',
+        whereArgs: [startY, endY, profileId], orderBy: 'ts DESC');
     double income = 0, expenses = 0;
     for (final r in rows) {
       final cents = r['amount_cents'] as int;
@@ -121,16 +156,34 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
+  String _profileName(int pid) {
+    if (pid == 0) return 'Personal';
+    for (final pr in profiles) {
+      if (pr['id'] == pid) return pr['name'] as String;
+    }
+    return 'Personal';
+  }
+
   Future<void> _delete(int id) async {
     await widget.db.delete('entries', where: 'id = ?', whereArgs: [id]);
     _refresh();
   }
 
+  Future<void> _deleteProfile(int pid) async {
+    // Spec rule: entries fall back to Personal — no data is ever deleted.
+    await widget.db.execute(
+        'UPDATE entries SET profile_id = 0 WHERE profile_id = ?', [pid]);
+    await widget.db.delete('profiles', where: 'id = ?', whereArgs: [pid]);
+    if (profileId == pid) profileId = 0;
+    _refresh();
+  }
+
   Future<void> _exportCsv() async {
     final rows = await widget.db.query('entries',
-        where: 'ts >= ? AND ts < ?',
+        where: 'ts >= ? AND ts < ? AND profile_id = ?',
         whereArgs: [DateTime(year).millisecondsSinceEpoch ~/ 1000,
-                    DateTime(year + 1).millisecondsSinceEpoch ~/ 1000],
+                    DateTime(year + 1).millisecondsSinceEpoch ~/ 1000,
+                    profileId],
         orderBy: 'ts');
     final data = [
       ['date', 'kind', 'category', 'amount', 'note'],
@@ -144,7 +197,14 @@ class _DashboardPageState extends State<DashboardPage> {
     ];
     final csv = const CsvEncoder().convert(data);
     final dir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dir.path, 'joosebooks_$year.csv'));
+    // Business piles export under their own filename: hand "the LLC file" to
+    // the accountant literally (spec: joosebooks_2026_my-llc.csv).
+    var fname = 'joosebooks_$year.csv';
+    if (profileId != 0) {
+      final slug = _profileName(profileId).toLowerCase().replaceAll(' ', '-');
+      fname = 'joosebooks_${year}_$slug.csv';
+    }
+    final file = File(p.join(dir.path, fname));
     await file.writeAsString(csv);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -158,9 +218,140 @@ class _DashboardPageState extends State<DashboardPage> {
       backgroundColor: kSurface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => AddEntrySheet(db: widget.db),
+      builder: (_) => AddEntrySheet(db: widget.db, profileId: profileId),
     );
     _refresh();
+  }
+
+  Future<void> _openProfilePopover() async {
+    // Popover: profiles (Personal always on top) + add button. Long-press a
+    // business to delete (entries fall back to Personal — nothing is lost).
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: kSurface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Your piles', style: TextStyle(fontSize: 13, color: kTextDim)),
+            const SizedBox(height: 8),
+            for (final pr in [
+              {'id': 0, 'name': 'Personal', 'entity': ''},
+              ...profiles,
+            ])
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Text(pr['id'] == 0 ? '👤' : '🏢',
+                    style: const TextStyle(fontSize: 18)),
+                title: Text(pr['name'] as String,
+                    style: TextStyle(
+                        color: pr['id'] == profileId ? kGold : kText,
+                        fontWeight: pr['id'] == profileId ? FontWeight.bold : FontWeight.normal)),
+                trailing: pr['id'] == 0
+                    ? null
+                    : GestureDetector(
+                        onLongPress: () async {
+                          final pid = pr['id'] as int;
+                          Navigator.pop(sheetCtx);
+                          final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (dCtx) => AlertDialog(
+                                  backgroundColor: kSurface,
+                                  title: const Text('Delete pile?', style: TextStyle(color: kText)),
+                                  content: Text(
+                                      'Entries in "${pr['name']}" move back to Personal. Nothing is deleted.',
+                                      style: const TextStyle(color: kTextDim)),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(dCtx, false),
+                                        child: const Text('Cancel', style: TextStyle(color: kTextDim))),
+                                    TextButton(onPressed: () => Navigator.pop(dCtx, true),
+                                        child: const Text('Move to Personal', style: TextStyle(color: kRed))),
+                                  ]));
+                          if (ok == true) _deleteProfile(pid);
+                        },
+                        child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.delete_outline, size: 20, color: kTextDim))),
+                onTap: () {
+                  setState(() => profileId = pr['id'] as int);
+                  Navigator.pop(sheetCtx);
+                  _refresh();
+                },
+              ),
+            const SizedBox(height: 4),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(sheetCtx);
+                _openAddProfile();
+              },
+              icon: const Icon(Icons.add_business, color: kGold, size: 20),
+              label: const Text('Add a business', style: TextStyle(color: kGold)),
+              style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: kGold),
+                  minimumSize: const Size(0, 44)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAddProfile() async {
+    // Two fields, ten seconds (spec): name + entity chips.
+    final nameCtrl = TextEditingController();
+    String entity = '';
+    final ok = await showDialog<bool>(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+            backgroundColor: kSurface,
+            title: const Text('Add a business', style: TextStyle(color: kGold)),
+            content: StatefulBuilder(builder: (bCtx, setDState) => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: kText),
+                    decoration: InputDecoration(
+                        hintText: 'Business name (e.g. Bong Media)',
+                        hintStyle: const TextStyle(color: kTextDim),
+                        filled: true, fillColor: kSurface2,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                      spacing: 6, runSpacing: 6,
+                      children: [
+                        for (final e in ['Sole Prop', 'LLC', 'S-Corp', 'C-Corp', 'Partnership', 'Other'])
+                          ChoiceChip(
+                              label: Text(e, style: const TextStyle(fontSize: 12)),
+                              selected: entity == e,
+                              selectedColor: kGold.withValues(alpha: 0.25),
+                              backgroundColor: kSurface2,
+                              labelStyle: TextStyle(color: entity == e ? kGold : kText),
+                              side: BorderSide(color: entity == e ? kGold : Colors.white12),
+                              onSelected: (_) => setDState(() => entity = e)),
+                      ]),
+                ])),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dCtx, false),
+                  child: const Text('Cancel', style: TextStyle(color: kTextDim))),
+              FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: kGold, foregroundColor: const Color(0xFF141210)),
+                  onPressed: () => Navigator.pop(dCtx, true),
+                  child: const Text('Save')),
+            ]));
+    final name = nameCtrl.text.trim();
+    if (ok == true && name.isNotEmpty) {
+      await widget.db.insert('profiles',
+          {'name': name, 'entity': entity, 'created_ts': DateTime.now().millisecondsSinceEpoch ~/ 1000});
+      setState(() => profileId = 0);
+      _refresh();
+    }
   }
 
   @override
@@ -175,11 +366,41 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Row(children: [
                 const Text('💼 JooseBooks',
-                    style: TextStyle(fontSize: 22, color: kGold, fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontSize: 20, color: kGold, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 6),
+                // Quiet door (spec): small dim chip, ignorable. Gold only when a
+                // business exists — the feature announces itself only when looked for.
+                // Natural width (NOT Flexible — a Spacer would steal its share).
+                GestureDetector(
+                  onTap: _openProfilePopover,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                        color: profiles.length > 1 ? kGold.withValues(alpha: 0.15) : kSurface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: profiles.length > 1 ? kGold : Colors.white12)),
+                    child: Text('${_profileName(profileId)} ▾',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: profiles.length > 1 ? kGold : kTextDim)),
+                  ),
+                ),
                 const Spacer(),
-                IconButton(onPressed: () { year--; _refresh(); }, icon: const Icon(Icons.chevron_left)),
+                IconButton(
+                    onPressed: () { year--; _refresh(); },
+                    icon: const Icon(Icons.chevron_left),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 32)),
                 Text('$year', style: const TextStyle(fontSize: 22, color: kText)),
-                IconButton(onPressed: () { year++; _refresh(); }, icon: const Icon(Icons.chevron_right)),
+                IconButton(
+                    onPressed: () { year++; _refresh(); },
+                    icon: const Icon(Icons.chevron_right),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 32)),
               ]),
               const SizedBox(height: 12),
               Container(
@@ -281,7 +502,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
 class AddEntrySheet extends StatefulWidget {
   final Database db;
-  const AddEntrySheet({super.key, required this.db});
+  final int profileId; // preset from the dashboard's selected pile
+  const AddEntrySheet({super.key, required this.db, this.profileId = 0});
   @override
   State<AddEntrySheet> createState() => _AddEntrySheetState();
 }
@@ -290,7 +512,21 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   String kind = 'in';
   String amountText = '';
   String category = 'Other';
+  int profileId = 0;
+  List<Map<String, Object?>> profiles = [];
   final noteCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    profileId = widget.profileId;
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    final rows = await widget.db.query('profiles', orderBy: 'id');
+    if (mounted) setState(() => profiles = rows);
+  }
 
   void _key(String k) {
     setState(() {
@@ -312,6 +548,7 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'amount_cents': (amount * 100).round(),
       'kind': kind, 'category': category, 'note': noteCtrl.text,
+      'profile_id': profileId,
     });
     if (mounted) Navigator.pop(context);
   }
@@ -379,6 +616,38 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           ],
         ),
         const SizedBox(height: 10),
+        // Profile chips: rendered ONLY when ≥1 business exists (spec) —
+        // zero-business users see a visually identical sheet as before.
+        if (profiles.isNotEmpty) ...[
+          Align(alignment: Alignment.centerLeft,
+              child: Text('Pile:',
+                  style: TextStyle(fontSize: 12, color: kTextDim))),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6, runSpacing: 6,
+            children: [
+              for (final pr in [
+                {'id': 0, 'name': 'Personal'},
+                ...profiles,
+              ])
+                ChoiceChip(
+                  label: Text(
+                      '${pr['id'] == 0 ? '👤' : '🏢'} ${pr['name']}',
+                      style: const TextStyle(fontSize: 12)),
+                  selected: profileId == pr['id'],
+                  selectedColor: kGold.withValues(alpha: 0.25),
+                  backgroundColor: kSurface2,
+                  labelStyle: TextStyle(
+                      color: profileId == pr['id'] ? kGold : kText),
+                  side: BorderSide(
+                      color: profileId == pr['id'] ? kGold : Colors.white12),
+                  onSelected: (_) =>
+                      setState(() => profileId = pr['id'] as int),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
         TextField(
           controller: noteCtrl,
           decoration: InputDecoration(
