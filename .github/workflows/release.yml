@@ -51,9 +51,10 @@ jobs:
       - name: Package (macOS)
         if: matrix.target == 'macos'
         run: |
-          cd build/macos/Build/Products/Release
-          ditto -c -k --sequesterRsrc --keepParent joosebooks.app ../../../JooseBooks-macos.zip
-          cd -
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -1)
+          echo "packaging $APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" JooseBooks-macos.zip
+          ls -la JooseBooks-macos.zip
 
       - name: Package (Windows)
         if: matrix.target == 'windows'
