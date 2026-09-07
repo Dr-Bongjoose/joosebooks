@@ -1,0 +1,91 @@
+name: Release
+
+# Builds desktop releases for all three platforms and attaches them to a
+# GitHub Release. Trigger: push a tag like v0.1.0
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}   # manual runs for testing the pipeline
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14        # arm64; builds universal via fat binary config
+            target: macos
+            artifact: JooseBooks-macos.zip
+          - os: windows-2022
+            target: windows
+            artifact: JooseBooks-windows.zip
+          - os: ubuntu-22.04
+            target: linux
+            artifact: JooseBooks-linux.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Linux build prerequisites
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev libblkid-dev
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build (${{ matrix.target }})
+        run: flutter build ${{ matrix.target }} --release
+
+      - name: Package (macOS)
+        if: matrix.target == 'macos'
+        run: |
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent joosebooks.app ../../../JooseBooks-macos.zip
+          cd -
+
+      - name: Package (Windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath JooseBooks-windows.zip
+
+      - name: Package (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          tar -czf JooseBooks-linux.tar.gz -C build/linux/x64/release/bundle .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || startsWith(github.ref_name, 'v0.') }}
