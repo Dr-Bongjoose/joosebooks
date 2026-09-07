@@ -35,12 +35,14 @@ Future<void> main() async {
           category TEXT NOT NULL DEFAULT 'Other',
           note TEXT DEFAULT ''
         )'''));
-  runApp(JooseBooksApp(db: db));
+  final debugAddSheet = Platform.environment['JOOSBOOKS_DEBUG'] == 'add-sheet';
+  runApp(JooseBooksApp(db: db, debugAddSheet: debugAddSheet));
 }
 
 class JooseBooksApp extends StatelessWidget {
   final Database db;
-  const JooseBooksApp({super.key, required this.db});
+  final bool debugAddSheet;
+  const JooseBooksApp({super.key, required this.db, this.debugAddSheet = false});
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +54,7 @@ class JooseBooksApp extends StatelessWidget {
         colorScheme: const ColorScheme.dark(primary: kGold, secondary: kGold),
         fontFamily: 'Roboto',
       ),
-      home: DashboardPage(db: db),
+      home: DashboardPage(db: db, debugAddSheet: debugAddSheet),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -60,7 +62,8 @@ class JooseBooksApp extends StatelessWidget {
 
 class DashboardPage extends StatefulWidget {
   final Database db;
-  const DashboardPage({super.key, required this.db});
+  final bool debugAddSheet;
+  const DashboardPage({super.key, required this.db, this.debugAddSheet = false});
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
@@ -75,6 +78,11 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _refresh();
+    if (widget.debugAddSheet) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 600), _openAdd);
+      });
+    }
   }
 
   Future<void> _refresh() async {
