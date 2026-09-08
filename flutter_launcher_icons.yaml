@@ -1,0 +1,6 @@
+flutter_launcher_icons:
+  image_path: "../branding/joosebooks/icon_512_v3_preview.png"
+  android: "ic_launcher"
+  adaptive_icon_background: "#0D0D10"
+  adaptive_icon_foreground: "../branding/joosebooks/icon_512_v3_foreground.png"
+  min_sdk_android: 24
