@@ -445,8 +445,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             return ListTile(
                               dense: true,
                               contentPadding: EdgeInsets.zero,
-                              leading: Text(
-                                  '${t.month.toString().padLeft(2, '0')}/${t.day.toString().padLeft(2, '0')}',
+                              leading: Text(DateFormat('MMM d').format(t),
                                   style: const TextStyle(color: kTextDim)),
                               title: Text('${isIn ? "🟢" : "🔴"} ${r['category']}',
                                   style: const TextStyle(color: kText)),
@@ -518,6 +517,10 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   int profileId = 0;
   List<Map<String, Object?>> profiles = [];
   final noteCtrl = TextEditingController();
+  // Date of the transaction — defaults to today, tappable to change. Stored
+  // at LOCAL NOON so year/month bucketing never shifts a day across midnight
+  // or DST edges.
+  DateTime entryDate = DateTime.now();
 
   @override
   void initState() {
@@ -547,8 +550,10 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   Future<void> _save() async {
     final amount = double.tryParse(amountText) ?? 0;
     if (amount <= 0) return;
+    final ts = DateTime(entryDate.year, entryDate.month, entryDate.day, 12)
+        .millisecondsSinceEpoch ~/ 1000;
     await widget.db.insert('entries', {
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'ts': ts,
       'amount_cents': (amount * 100).round(),
       'kind': kind, 'category': category, 'note': noteCtrl.text,
       'profile_id': profileId,
@@ -564,6 +569,37 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           bottom: MediaQuery.of(context).viewInsets.bottom + 16),
       child: SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Date row: default today, tap to change (click-driven; no keyboard).
+        Align(alignment: Alignment.centerLeft,
+            child: Text('Date:',
+                style: TextStyle(fontSize: 12, color: kTextDim))),
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: () async {
+            final picked = await showDatePicker(
+                context: context,
+                initialDate: entryDate,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100));
+            if (picked != null) setState(() => entryDate = picked);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+                color: kSurface2,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.calendar_today, size: 14, color: kGold),
+              const SizedBox(width: 6),
+              Text(DateFormat('EEE, MMM d, yyyy').format(entryDate),
+                  style: const TextStyle(fontSize: 13, color: kText)),
+              const SizedBox(width: 4),
+              const Icon(Icons.edit, size: 12, color: kTextDim),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _kindButton('⬆ Money IN', 'in', kGreen)),
           const SizedBox(width: 10),

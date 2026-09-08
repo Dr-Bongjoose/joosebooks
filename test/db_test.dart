@@ -125,6 +125,28 @@ void main() {
     setUp(() async => db = await openAppDatabase(inMemoryDatabasePath));
     tearDown(() => db.close());
 
+    test('save path: entry with explicit noon ts lands in right year+profile query', () async {
+      // What AddEntrySheet._save does with a user-chosen date (Sep 1 2026).
+      final chosen = DateTime(2026, 9, 1, 12);
+      final ts = chosen.millisecondsSinceEpoch ~/ 1000;
+      final pid = await db.insert(
+          'profiles', {'name': 'Bong Media', 'entity': 'LLC', 'created_ts': 0});
+      await db.insert('entries', {
+        'ts': ts, 'amount_cents': 1200, 'kind': 'out',
+        'category': 'Server costs', 'note': 'hosting', 'profile_id': pid});
+      // Year query (dashboard) finds it.
+      final (startY, endY) = yearWindow(2026);
+      final rows = await db.query('entries',
+          where: 'ts >= ? AND ts < ? AND profile_id = ?',
+          whereArgs: [startY, endY, pid]);
+      expect(rows.length, 1);
+      // Round-trip preserves the chosen calendar day.
+      final back = DateTime.fromMillisecondsSinceEpoch((rows.single['ts'] as int) * 1000);
+      expect(back.year, 2026);
+      expect(back.month, 9);
+      expect(back.day, 1);
+    });
+
     test('noon rule: entry at local noon of chosen day buckets into that day', () {
       // Sep 1 2026, local noon — 12h on each side of midnight boundaries.
       final noon = DateTime(2026, 9, 1, 12);
