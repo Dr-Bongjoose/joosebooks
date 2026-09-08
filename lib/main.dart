@@ -371,17 +371,21 @@ class _DashboardPageState extends State<DashboardPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Shrink-to-fit header: back button + title + pile chip + year
-              // nav can exceed narrow windows — FittedBox scales the row down
-              // instead of painting OVERFLOW stripes (seen on 445pt window).
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(children: [
+              // nav can exceed narrow windows. FittedBox triggered a Flutter
+              // framework semantics assertion crash-loop (!semantics.parent-
+              // DataDirty, 3.47) — so instead: OverflowBar-free layout using
+              // Flexible chip + compact spacing. The title is the only piece
+              // allowed to shrink (ellipsis).
+              Row(children: [
                 // Back to Overview when the dashboard was pushed onto the
                 // navigator (home = OverviewPage). Absent when it IS the home.
                 if (Navigator.of(context).canPop())
                   const BackButton(color: kText),
-                const Text('💼 JooseBooks',
-                    style: TextStyle(fontSize: 20, color: kGold, fontWeight: FontWeight.bold)),
+                const Text('💼', style: TextStyle(fontSize: 18)),
+                const SizedBox(width: 4),
+                Flexible(child: Text('JooseBooks',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 20, color: kGold, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 6),
                 // Quiet door (spec): small dim chip, ignorable. Gold only when a
                 // business exists — the feature announces itself only when looked for.
@@ -403,20 +407,20 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const Spacer(),
+                Text('$year', style: const TextStyle(fontSize: 20, color: kText)),
                 IconButton(
                     onPressed: () { year--; _refresh(); },
                     icon: const Icon(Icons.chevron_left),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 32)),
-                Text('$year', style: const TextStyle(fontSize: 22, color: kText)),
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 32)),
                 IconButton(
                     onPressed: () { year++; _refresh(); },
                     icon: const Icon(Icons.chevron_right),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 32)),
-              ])),
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 32)),
+              ]),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
