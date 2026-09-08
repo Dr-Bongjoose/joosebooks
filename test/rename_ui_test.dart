@@ -69,6 +69,36 @@ void main() {
       expect(find.text('Personal'), findsNothing);
     });
 
+    testWidgets('dashboard shows a back arrow when pushed; tapping returns to overview',
+        (tester) async {
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        home: const Scaffold(
+            body: Center(child: Text('OVERVIEW-SENTINEL'))),
+      ));
+      await settle(tester);
+      // Push the dashboard the same way OverviewPage does. NOT awaited —
+      // push's future resolves only when the route is popped, and that
+      // happens later in this test (awaiting it deadlocks fake-async).
+      nav.currentState!
+          .push(MaterialPageRoute(builder: (_) => DashboardPage(db: db)));
+      await settle(tester, 500);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Dashboard is on top: the home route below is offstage (kept alive
+      // but excluded from hit testing), and the dashboard header shows a
+      // back affordance.
+      expect(find.byType(BackButton), findsOneWidget);
+
+      // Tap back → overview sentinel visible again.
+      await tester.tap(find.byType(BackButton));
+      await settle(tester, 400);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('OVERVIEW-SENTINEL'), findsOneWidget);
+    });
+
     testWidgets('rename updates the dashboard header chip', (tester) async {
       await tester.pumpWidget(JooseBooksApp(db: db, home: DashboardPage(db: db)));
       await settle(tester);

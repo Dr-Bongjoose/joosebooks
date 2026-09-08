@@ -371,6 +371,10 @@ class _DashboardPageState extends State<DashboardPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(children: [
+                // Back to Overview when the dashboard was pushed onto the
+                // navigator (home = OverviewPage). Absent when it IS the home.
+                if (Navigator.of(context).canPop())
+                  const BackButton(color: kText),
                 const Text('💼 JooseBooks',
                     style: TextStyle(fontSize: 20, color: kGold, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 6),

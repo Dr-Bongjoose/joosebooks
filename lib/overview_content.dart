@@ -71,14 +71,19 @@ class OverviewContent extends StatelessWidget {
                         }),
               ),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: onQuickAdd,
-                icon: const Icon(Icons.add, color: kGold),
-                label: const Text('Quick add', style: TextStyle(color: kGold)),
-                style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: kGold),
-                    backgroundColor: kSurface2,
-                    minimumSize: const Size(0, 44)),
+              // Quick add is the FAB's label twin; FAB sits bottom-right, so
+              // pad the button clear of it instead of fighting for the corner.
+              Padding(
+                padding: const EdgeInsets.only(right: 72),
+                child: OutlinedButton.icon(
+                  onPressed: onQuickAdd,
+                  icon: const Icon(Icons.add, color: kGold),
+                  label: const Text('Quick add', style: TextStyle(color: kGold)),
+                  style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: kGold),
+                      backgroundColor: kSurface2,
+                      minimumSize: const Size(0, 44)),
+                ),
               ),
             ],
           ),
@@ -152,10 +157,13 @@ class ProfileCard extends StatelessWidget {
             const SizedBox(width: 14),
             Text('out \$${expenses.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 12, color: Color(0xFFE65959))),
-            const Spacer(),
-            Text('J F M A M J J A S O N D',
-                style: const TextStyle(fontSize: 9, letterSpacing: 6, color: kTextDim)),
           ]),
+          const SizedBox(height: 6),
+          // Month initials on their own centered line — inside a tight Row
+          // they overflowed (seen in screenshot, analyzer can't catch layout).
+          Text('J F M A M J J A S O N D',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 9, letterSpacing: 6, color: kTextDim)),
         ]),
       ),
     );
