@@ -19,11 +19,15 @@
 - AAB path: `~/joose-labs/joosebooks/build/app/outputs/bundle/release/app-release.aab` (52 MB, built 12:44)
 
 ## NEXT ACTIONS (in order)
-1. ~~Upload new AAB~~ ✅ DONE — v1.0.0+2 uploaded, release name "1.0.0 (2) - crash fix", notes submitted, "Changes in review" on Publishing overview.
-2. **WAIT for Google review** of the 1.0.0+2 release (app-update reviews usually fast: minutes–hours). Track page will show "Changes in review" until then.
-3. After approval: Alpha track serves versionCode 2. User's phone auto-updates (Play may lag up to a few hours; force-stop Play Store or check My apps → Updates).
-4. Verify on device: name "JooseBooks", JB icon, no startup crash. 14-day clock continues.
-5. Version policy going forward: every console upload needs a NEW versionCode (bump + in pubspec.yaml).
+1. v1.0.0+2 shipped but app STILL crashed on launch. REAL root cause found via emulator logcat:
+   ClassNotFoundException — manifest `.MainActivity` resolves against Gradle NAMESPACE
+   (com.jooselabs.joosebooks_flutter), but MainActivity.kt sat in pkg com.jooselabs.joosebooks.
+   Fix (commit "v1.0.0+3"): moved MainActivity.kt into kotlin/com/jooselabs/joosebooks_flutter/.
+   EMULATOR-VERIFIED: app launches, 0 crashes, JooseBooks UI visible (screencap proof).
+2. ✅ v1.0.0+3 AAB uploaded by user; release "1.0.0 (3) - startup crash fixed" SUBMITTED → "Changes in review".
+3. After review clears: Alpha serves versionCode 3 → phone auto-updates → verify it opens.
+4. Version policy: every upload bumps + in pubspec.yaml (now 1.0.0+3).
+5. Emulator gotcha: 56MB AAB needs `-partition-size 4096` + `-wipe-data` or install fails on space.
 
 ## Gotchas learned this session
 - `android:label` is the store/launcher name — pubspec `name:` is NOT it.
