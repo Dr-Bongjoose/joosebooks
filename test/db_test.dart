@@ -162,7 +162,7 @@ void main() {
     test('splits income/expenses per month per profile for a year', () async {
       final pid = await db.insert(
           'profiles', {'name': 'Bong Media', 'entity': 'LLC', 'created_ts': 0});
-      final secs = (int mo, int day) =>
+      int secs(int mo, int day) =>
           DateTime(2026, mo, day, 12).millisecondsSinceEpoch ~/ 1000;
       await db.insert('entries', {
         'ts': secs(2, 10), 'amount_cents': 10000, 'kind': 'in', 'profile_id': 0});

@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
+import 'db.dart';
 
 /// JooseBooks — bookkeeping for people who hate bookkeeping (Flutter edition).
 /// Money in, money out, profit. Same one-screen philosophy as the Godot build.
@@ -25,46 +26,8 @@ Future<void> main() async {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   final dir = await getApplicationSupportDirectory();
-  final db = await openDatabase(p.join(dir.path, 'joosebooks.db'), version: 2,
-      onCreate: (db, v) async {
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER NOT NULL,
-            amount_cents INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            category TEXT NOT NULL DEFAULT 'Other',
-            note TEXT DEFAULT '',
-            profile_id INTEGER DEFAULT 0
-          )''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS profiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            entity TEXT DEFAULT '',
-            created_ts INTEGER NOT NULL
-          )''');
-        await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_entries_profile ON entries(profile_id, ts)');
-      },
-      onUpgrade: (db, oldV, newV) async {
-        if (oldV < 2) {
-          // Guarded ALTER: pre-profile installs add the column; old entries stay
-          // Personal (0). Never moves or deletes anyone's data.
-          try {
-            await db.execute('ALTER TABLE entries ADD COLUMN profile_id INTEGER DEFAULT 0');
-          } catch (_) {}
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS profiles (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              entity TEXT DEFAULT '',
-              created_ts INTEGER NOT NULL
-            )''');
-          await db.execute(
-              'CREATE INDEX IF NOT EXISTS idx_entries_profile ON entries(profile_id, ts)');
-        }
-      });
+  // v3: Personal is a real profile row (renameable); entries semantics unchanged.
+  final db = await openAppDatabase(p.join(dir.path, 'joosebooks.db'));
   final debugAddSheet = Platform.environment['JOOSBOOKS_DEBUG'] == 'add-sheet';
   runApp(JooseBooksApp(db: db, debugAddSheet: debugAddSheet));
 }
@@ -157,7 +120,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   String _profileName(int pid) {
-    if (pid == 0) return 'Personal';
     for (final pr in profiles) {
       if (pr['id'] == pid) return pr['name'] as String;
     }
@@ -167,6 +129,40 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _delete(int id) async {
     await widget.db.delete('entries', where: 'id = ?', whereArgs: [id]);
     _refresh();
+  }
+
+  Future<void> _renameProfile(int pid) async {
+    final current = _profileName(pid);
+    final nameCtrl = TextEditingController(text: current);
+    final ok = await showDialog<bool>(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+            backgroundColor: kSurface,
+            title: const Text('Rename pile', style: TextStyle(color: kGold)),
+            content: TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(color: kText),
+              decoration: InputDecoration(
+                  filled: true, fillColor: kSurface2,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dCtx, false),
+                  child: const Text('Cancel', style: TextStyle(color: kTextDim))),
+              FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: kGold, foregroundColor: const Color(0xFF141210)),
+                  onPressed: () => Navigator.pop(dCtx, true),
+                  child: const Text('Save')),
+            ]));
+    final name = nameCtrl.text.trim();
+    if (ok == true && name.isNotEmpty && name != current) {
+      await renameProfile(widget.db, pid, name);
+      await _refresh(); // fresh names before reopening, or the popover shows stale data
+      if (!mounted) return;
+      // Reopen the popover so the CEO sees the rename landed, still in context.
+      await _openProfilePopover();
+    }
   }
 
   Future<void> _deleteProfile(int pid) async {
@@ -224,8 +220,9 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _openProfilePopover() async {
-    // Popover: profiles (Personal always on top) + add button. Long-press a
-    // business to delete (entries fall back to Personal — nothing is lost).
+    // Popover: piles from the DB (Personal is a real row now, always first by
+    // id). Rename via the pencil; long-press a business to delete (entries
+    // fall back to the Personal pile — nothing is lost).
     await showModalBottomSheet(
       context: context,
       backgroundColor: kSurface,
@@ -237,10 +234,7 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Your piles', style: TextStyle(fontSize: 13, color: kTextDim)),
             const SizedBox(height: 8),
-            for (final pr in [
-              {'id': 0, 'name': 'Personal', 'entity': ''},
-              ...profiles,
-            ])
+            for (final pr in profiles)
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -250,9 +244,17 @@ class _DashboardPageState extends State<DashboardPage> {
                     style: TextStyle(
                         color: pr['id'] == profileId ? kGold : kText,
                         fontWeight: pr['id'] == profileId ? FontWeight.bold : FontWeight.normal)),
-                trailing: pr['id'] == 0
-                    ? null
-                    : GestureDetector(
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(
+                      tooltip: 'Rename',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.edit_outlined, size: 18, color: kTextDim),
+                      onPressed: () {
+                        Navigator.pop(sheetCtx);
+                        _renameProfile(pr['id'] as int);
+                      }),
+                  if (pr['id'] != 0)
+                    GestureDetector(
                         onLongPress: () async {
                           final pid = pr['id'] as int;
                           Navigator.pop(sheetCtx);
@@ -275,6 +277,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         child: const Padding(
                             padding: EdgeInsets.all(8),
                             child: Icon(Icons.delete_outline, size: 20, color: kTextDim))),
+                ]),
                 onTap: () {
                   setState(() => profileId = pr['id'] as int);
                   Navigator.pop(sheetCtx);
@@ -618,7 +621,8 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
         const SizedBox(height: 10),
         // Profile chips: rendered ONLY when ≥1 business exists (spec) —
         // zero-business users see a visually identical sheet as before.
-        if (profiles.isNotEmpty) ...[
+        // Personal is a real row now; its name comes from the DB (renameable).
+        if (profiles.length > 1) ...[
           Align(alignment: Alignment.centerLeft,
               child: Text('Pile:',
                   style: TextStyle(fontSize: 12, color: kTextDim))),
@@ -626,10 +630,7 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           Wrap(
             spacing: 6, runSpacing: 6,
             children: [
-              for (final pr in [
-                {'id': 0, 'name': 'Personal'},
-                ...profiles,
-              ])
+              for (final pr in profiles)
                 ChoiceChip(
                   label: Text(
                       '${pr['id'] == 0 ? '👤' : '🏢'} ${pr['name']}',
