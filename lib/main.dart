@@ -370,7 +370,12 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(children: [
+              // Shrink-to-fit header: back button + title + pile chip + year
+              // nav can exceed narrow windows — FittedBox scales the row down
+              // instead of painting OVERFLOW stripes (seen on 445pt window).
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(children: [
                 // Back to Overview when the dashboard was pushed onto the
                 // navigator (home = OverviewPage). Absent when it IS the home.
                 if (Navigator.of(context).canPop())
@@ -411,7 +416,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 28, minHeight: 32)),
-              ]),
+              ])),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
