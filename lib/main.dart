@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
 import 'db.dart';
+import 'overview.dart';
 
 /// JooseBooks — bookkeeping for people who hate bookkeeping (Flutter edition).
 /// Money in, money out, profit. Same one-screen philosophy as the Godot build.
@@ -35,7 +36,8 @@ Future<void> main() async {
 class JooseBooksApp extends StatelessWidget {
   final Database db;
   final bool debugAddSheet;
-  const JooseBooksApp({super.key, required this.db, this.debugAddSheet = false});
+  final Widget? home; // test/overview override; default = OverviewPage
+  const JooseBooksApp({super.key, required this.db, this.debugAddSheet = false, this.home});
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +49,7 @@ class JooseBooksApp extends StatelessWidget {
         colorScheme: const ColorScheme.dark(primary: kGold, secondary: kGold),
         fontFamily: 'Roboto',
       ),
-      home: DashboardPage(db: db, debugAddSheet: debugAddSheet),
+      home: home ?? OverviewPage(db: db),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -56,14 +58,15 @@ class JooseBooksApp extends StatelessWidget {
 class DashboardPage extends StatefulWidget {
   final Database db;
   final bool debugAddSheet;
-  const DashboardPage({super.key, required this.db, this.debugAddSheet = false});
+  final int initialProfileId; // which pile was tapped on the Overview
+  const DashboardPage({super.key, required this.db, this.debugAddSheet = false, this.initialProfileId = 0});
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
 class _DashboardPageState extends State<DashboardPage> {
   late int year = DateTime.now().year;
-  int profileId = 0; // selected business profile (0 = Personal)
+  late int profileId = widget.initialProfileId; // selected business profile (0 = Personal)
   List<Map<String, Object?>> profiles = [];
   Map<String, double>? summary;
   String? monthLine;

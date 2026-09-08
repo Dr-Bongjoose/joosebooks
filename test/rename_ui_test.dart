@@ -29,7 +29,7 @@ void main() {
 
     testWidgets('popover lists piles; rename dialog prefilled; save renames Personal',
         (tester) async {
-      await tester.pumpWidget(JooseBooksApp(db: db));
+      await tester.pumpWidget(JooseBooksApp(db: db, home: DashboardPage(db: db)));
       await settle(tester); // let initState _refresh finish
 
       // Open the pile popover.
@@ -70,7 +70,7 @@ void main() {
     });
 
     testWidgets('rename updates the dashboard header chip', (tester) async {
-      await tester.pumpWidget(JooseBooksApp(db: db));
+      await tester.pumpWidget(JooseBooksApp(db: db, home: DashboardPage(db: db)));
       await settle(tester);
       await tester.tap(find.textContaining('▾'));
       await tester.pump(const Duration(milliseconds: 300));
