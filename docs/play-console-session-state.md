@@ -1,30 +1,38 @@
-# Play Console Session State — JooseBooks (v3)
+# JooseBooks — Play Console session state (v4)
 
-**Date:** 2026-09-08 (evening)
-**Status:** 🚀 **ALL 13 CHANGES SUBMITTED FOR REVIEW** — "Changes in review" on Publishing overview
+## Current state (2026-09-08 afternoon)
+- **Alpha release 1.0.0 (versionCode 1) is LIVE** on Closed testing - Alpha, published Sep 8.
+- Tester list **JB Testers** (2 users incl. insanlycrazy14@gmail.com) attached to Alpha; review cleared.
+- User installed the app → **v1 build crashes on Android startup** and shows wrong name/icon.
 
-## What happened this session (v3)
-1. AAB v1.0.0+1 uploaded by user (manual drag-drop), processed OK (App bundle 1, 8.81MB / 5s delivery).
-2. Fixed release notes language tag error: notes must be wrapped in `<en-US>` tags.
-3. Cleared 3 release errors: financial-features checkbox, Health apps declaration, Dashboard setup items.
-4. Dashboard completed: Data safety ("no data collection"), Target audience (18+), Government apps (No), Financial features (No), Health (No), **App category = Productivity** (modal Save kept failing via AXPress; type-ahead in the open dropdown + Save worked), Contact details (jooselabs@protonmail.com + jooselabs.com).
-5. **Last blocker: Advertising ID declaration** (App content → Advertising ID) = "No", saved.
-6. Clicked "Submit 13 changes for review" → confirmed → **"Changes in review"** ✅
+## Root causes diagnosed (fixed in repo, awaiting new AAB upload)
+1. **Crash**: `sqflite_common_ffi` + `databaseFactoryFfi` without `sqlite3_flutter_libs` → no bundled libsqlite3.so on Android → startup crash before UI. Desktop worked (system SQLite).
+2. **Name**: `android:label="joosebooks_flutter"` (template default) → fixed to "JooseBooks".
+3. **Icon**: default Flutter mipmap → replaced with JB monogram via flutter_launcher_icons
+   (config: `flutter_launcher_icons.yaml`, source: `../branding/joosebooks/icon_512_v3_preview.png`,
+   adaptive bg #0D0D10, foreground built with sips to 1024).
 
-## Current state
-- Publishing overview: all changes **in review**. Google review typically ≤7 days.
-- Closed testing - Alpha: countries 176/176 ✅, testers EMPTY (deliberately deferred), release draft saved + submitted.
-- Store listing: "Ready to send for review" (rolled into the same submission).
-- App content: every form green.
+## Fixes committed (commit a499f71 + version bump)
+- `pubspec.yaml`: + sqlite3_flutter_libs; version now **1.0.0+2**
+- `AndroidManifest.xml`: label "JooseBooks"
+- New AAB built + **verified with bundletool**: versionCode=2, versionName=1.0.0, label=JooseBooks, JB icon in mipmaps, libsqlite3.so bundled for arm64/armv7/x86_64
+- AAB path: `~/joose-labs/joosebooks/build/app/outputs/bundle/release/app-release.aab` (52 MB, built 12:44)
 
-## After approval
-- Release goes live on Closed testing - Alpha track.
-- **Testers still needed:** ~12 email addresses must be added to the track for the 14-day clock. Console may show "Changes in review" until approval; testers can be added anytime.
-- 14-day closed-test clock starts only when ≥12 opted-in testers have the build.
-- Then Production unlocks.
+## NEXT ACTIONS (in order)
+1. Upload new AAB (1.0.0+2) to Closed testing - Alpha → Create new release → add release notes (<en-US> tags!) → Save → Publishing overview → Submit for review.
+2. IMPORTANT: uploading a new release **deactivates** the old one on the track until reviewed — Play review for an update to an already-reviewed app is usually FAST (minutes-hours).
+3. After approval: user's phone auto-updates (or Play Store → manual update). Old broken install replaced; crash gone, name/icon fixed.
+4. Version policy going forward: every console upload needs a NEW versionCode (bump + in pubspec.yaml).
 
-## Gotchas learned (v3)
-- Release notes REQUIRE `<en-US>` wrapping or "Next" blocks with orange validation.
-- Play Console modals: AXPress on Save sometimes returns -25202 (button not actually pressable via AX) — retry after re-capture; for virtualized dropdowns use type-ahead (type the option text) then Save.
-- Dashboard "10 of 11" can lag a beat after saving; reload if stuck.
-- The advertising-ID declaration lives in App content, surfaced via Publishing overview "View 1 issue".
+## Gotchas learned this session
+- `android:label` is the store/launcher name — pubspec `name:` is NOT it.
+- Desktop-first sqflite_common_ffi apps MUST ship sqlite3_flutter_libs for Android/iOS.
+- flutter_launcher_icons: foreground art should be ~66% of canvas (safe zone); whole-square art gets cropped by circular masks.
+- bundletool dump manifest = reliable AAB verification (aapt2 can't read .aab directly).
+- Publishing overview "Restart review" button appears if review already in progress.
+- Testers email-list changes re-trigger review; "in review" blocks opt-in link until cleared.
+
+## Tester install link
+- Opt-in: https://play.google.com/apps/testing/com.jooselabs.joosebooks
+- Store listing: https://play.google.com/store/apps/details?id=com.jooselabs.joosebooks
+- 14-day closed-test clock starts when ~12 testers have the build. Currently 1 tester (user).
