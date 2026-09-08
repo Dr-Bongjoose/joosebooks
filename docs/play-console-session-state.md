@@ -19,10 +19,11 @@
 - AAB path: `~/joose-labs/joosebooks/build/app/outputs/bundle/release/app-release.aab` (52 MB, built 12:44)
 
 ## NEXT ACTIONS (in order)
-1. Upload new AAB (1.0.0+2) to Closed testing - Alpha → Create new release → add release notes (<en-US> tags!) → Save → Publishing overview → Submit for review.
-2. IMPORTANT: uploading a new release **deactivates** the old one on the track until reviewed — Play review for an update to an already-reviewed app is usually FAST (minutes-hours).
-3. After approval: user's phone auto-updates (or Play Store → manual update). Old broken install replaced; crash gone, name/icon fixed.
-4. Version policy going forward: every console upload needs a NEW versionCode (bump + in pubspec.yaml).
+1. ~~Upload new AAB~~ ✅ DONE — v1.0.0+2 uploaded, release name "1.0.0 (2) - crash fix", notes submitted, "Changes in review" on Publishing overview.
+2. **WAIT for Google review** of the 1.0.0+2 release (app-update reviews usually fast: minutes–hours). Track page will show "Changes in review" until then.
+3. After approval: Alpha track serves versionCode 2. User's phone auto-updates (Play may lag up to a few hours; force-stop Play Store or check My apps → Updates).
+4. Verify on device: name "JooseBooks", JB icon, no startup crash. 14-day clock continues.
+5. Version policy going forward: every console upload needs a NEW versionCode (bump + in pubspec.yaml).
 
 ## Gotchas learned this session
 - `android:label` is the store/launcher name — pubspec `name:` is NOT it.
