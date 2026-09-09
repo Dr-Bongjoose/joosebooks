@@ -22,6 +22,13 @@
   v1/v2 installs upgrade in place with no data movement.
 - Dashboard header shrinks gracefully (Flexible title, compact year nav) so
   the back button fits narrow windows.
+- **Removed the duplicate "Quick add" button** at the bottom of the Overview
+  card list — it opened the exact same add-entry sheet as the gold + FAB.
+  The FAB is now the single add affordance.
+- Month initials (J F M A M J J A S O N D) are rendered by the chart widget
+  itself, one cell per month slot, so every letter is centered under its own
+  bar column at any card width (previously a single letter-spaced text line
+  whose spacing didn't track the chart geometry).
 
 ### Fixed
 - Rename popover showed stale names until reopen (state refresh before

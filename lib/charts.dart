@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:joosebooks_flutter/main.dart' show kTextDim;
 
 /// P0 design tokens (imported values — keep in sync with main.dart until a
 /// shared theme file exists; both read from one place at refactor time).
@@ -10,17 +11,38 @@ const kDimChart = Color(0xFF3A3A44);
 /// 12-month income/expense mini bar chart. Green bars grow UP from the
 /// midline, red bars grow DOWN; months with nothing show a dim baseline tick.
 /// Hand-painted (CustomPainter) — zero dependencies, P0 colors, scales to any
-/// card width.
+/// card width. Month initials (J F M A M J J A S O N D) render under the
+/// bars as 12 Expanded cells in one Row — each cell is exactly one bar slot
+/// wide, so letters are centered on their bars by construction (a single
+/// letterSpacing string drifted off the slot geometry).
 class MiniBarChart extends StatelessWidget {
   final List<Map<String, double>> buckets; // from monthlyByProfile()
   const MiniBarChart({super.key, required this.buckets});
 
+  static const monthLetters = [
+    'J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: MiniBarChartPainter(buckets: buckets),
-      size: const Size(double.infinity, 64),
-    );
+    return Column(children: [
+      Expanded(
+        child: CustomPaint(
+          painter: MiniBarChartPainter(buckets: buckets),
+          size: Size.infinite,
+        ),
+      ),
+      const SizedBox(height: 5),
+      Row(children: [
+        for (var m = 0; m < 12; m++)
+          Expanded(
+            child: Text(monthLetters[m],
+                key: ValueKey('month-label-$m'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 9, color: kTextDim)),
+          ),
+      ]),
+    ]);
   }
 }
 

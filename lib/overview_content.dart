@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joosebooks_flutter/charts.dart';
-import 'package:joosebooks_flutter/main.dart' show kSurface, kSurface2,
-    kGold, kText, kTextDim;
+import 'package:joosebooks_flutter/main.dart'
+    show kSurface, kGold, kText, kTextDim;
 
 /// Pure presentation for the Overview home — one card per pile (Personal
 /// first): the year's mini bar chart + income/expenses/profit. No database
@@ -13,6 +13,9 @@ class OverviewContent extends StatelessWidget {
   final Map<int, List<Map<String, double>>> monthly;
   final Map<int, Map<String, double>> totals;
   final ValueChanged<int> onOpenPile;
+  // Quick add (the FAB) opens the add-entry sheet — kept for API stability
+  // with OverviewPage; the Overview card itself no longer renders a second
+  // button for it (duplicate affordance, removed Sep 2026).
   final VoidCallback onQuickAdd;
   final VoidCallback onPrevYear;
   final VoidCallback onNextYear;
@@ -71,20 +74,8 @@ class OverviewContent extends StatelessWidget {
                         }),
               ),
               const SizedBox(height: 8),
-              // Quick add is the FAB's label twin; FAB sits bottom-right, so
-              // pad the button clear of it instead of fighting for the corner.
-              Padding(
-                padding: const EdgeInsets.only(right: 72),
-                child: OutlinedButton.icon(
-                  onPressed: onQuickAdd,
-                  icon: const Icon(Icons.add, color: kGold),
-                  label: const Text('Quick add', style: TextStyle(color: kGold)),
-                  style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: kGold),
-                      backgroundColor: kSurface2,
-                      minimumSize: const Size(0, 44)),
-                ),
-              ),
+              // No bottom add button here — the gold FAB (bottom-right) is
+              // the single add affordance; it opens the same add-entry sheet.
             ],
           ),
         ),
@@ -148,6 +139,8 @@ class ProfileCard extends StatelessWidget {
             const Icon(Icons.chevron_right, size: 16, color: kTextDim),
           ]),
           const SizedBox(height: 10),
+          // 64px total footprint: bars + 5px gap + letter row. Same height
+          // the old chart+label pair occupied, so card spacing is unchanged.
           SizedBox(height: 64, width: double.infinity,
               child: MiniBarChart(buckets: buckets)),
           const SizedBox(height: 10),
@@ -158,12 +151,8 @@ class ProfileCard extends StatelessWidget {
             Text('out \$${expenses.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 12, color: Color(0xFFE65959))),
           ]),
-          const SizedBox(height: 6),
-          // Month initials on their own centered line — inside a tight Row
-          // they overflowed (seen in screenshot, analyzer can't catch layout).
-          Text('J F M A M J J A S O N D',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 9, letterSpacing: 6, color: kTextDim)),
+          // Month initials live inside MiniBarChart now — one Expanded cell
+          // per slot, centered on its bar by construction.
         ]),
       ),
     );

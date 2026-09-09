@@ -46,6 +46,9 @@ void main() {
       // Profit color-coding text (negative shows minus).
       expect(find.text('profit -\$50.00'), findsOneWidget);
       expect(find.text('profit \$200.00'), findsOneWidget);
+      // The duplicate add button is gone — the FAB is the single add affordance.
+      expect(find.text('Quick add'), findsNothing);
+      expect(find.byType(FloatingActionButton), findsOneWidget);
     });
 
     testWidgets('empty state when no piles', (tester) async {
