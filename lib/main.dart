@@ -30,14 +30,48 @@ Future<void> main() async {
   // v3: Personal is a real profile row (renameable); entries semantics unchanged.
   final db = await openAppDatabase(p.join(dir.path, 'joosebooks.db'));
   final debugAddSheet = Platform.environment['JOOSBOOKS_DEBUG'] == 'add-sheet';
-  runApp(JooseBooksApp(db: db, debugAddSheet: debugAddSheet));
+  // JOOSBOOKS_DEMO=1: demo DB + dashboard auto-opens the edit sheet on the
+  // first entry. JOOSBOOKS_DEMO=2: demo DB, dashboard stays on the list
+  // (screenshot the rows + swipe/undo flow). Both use a THROWAWAY demo DB;
+  // real books untouched.
+  final demoMode = Platform.environment['JOOSBOOKS_DEMO'];
+  final demo = demoMode == '1' || demoMode == '2';
+  final Database demoDb;
+  if (demo) {
+    await db.close();
+    demoDb = await openAppDatabase(p.join(dir.path, 'joosebooks-demo.db'));
+    final n = (await demoDb.rawQuery(
+            'SELECT COUNT(*) c FROM entries')) //
+        .first['c'] as int? ?? 0;
+    if (n == 0) {
+      final now = DateTime.now();
+      int ts(DateTime d) => DateTime(d.year, d.month, d.day, 12)
+          .millisecondsSinceEpoch ~/ 1000;
+      await demoDb.insert('entries', {
+        'ts': ts(DateTime(now.year, now.month, now.day)),
+        'amount_cents': 2550, 'kind': 'out', 'category': 'Equipment',
+        'note': 'USB-C hub (edit me)', 'profile_id': 0});
+      await demoDb.insert('entries', {
+        'ts': ts(DateTime(now.year, now.month, now.day - 1)),
+        'amount_cents': 120000, 'kind': 'in', 'category': 'Revenue',
+        'note': 'Invoice #104', 'profile_id': 0});
+      await demoDb.insert('entries', {
+        'ts': ts(DateTime(now.year, now.month, now.day - 2)),
+        'amount_cents': 3000, 'kind': 'out', 'category': 'Software/tools',
+        'note': 'Domain renewal', 'profile_id': 0});
+    }
+  } else {
+    demoDb = db;
+  }
+  runApp(JooseBooksApp(db: demoDb, debugAddSheet: debugAddSheet, demoAutoEdit: demo));
 }
 
 class JooseBooksApp extends StatelessWidget {
   final Database db;
   final bool debugAddSheet;
   final Widget? home; // test/overview override; default = OverviewPage
-  const JooseBooksApp({super.key, required this.db, this.debugAddSheet = false, this.home});
+  final bool demoAutoEdit;
+  const JooseBooksApp({super.key, required this.db, this.debugAddSheet = false, this.home, this.demoAutoEdit = false});
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +83,12 @@ class JooseBooksApp extends StatelessWidget {
         colorScheme: const ColorScheme.dark(primary: kGold, secondary: kGold),
         fontFamily: 'Roboto',
       ),
-      home: home ?? OverviewPage(db: db),
+      // Demo mode lands straight on a dashboard (auto-edit); normal launch
+      // opens the Overview as always.
+      home: home ??
+          (demoAutoEdit
+              ? DashboardPage(db: db, demoAutoEdit: true)
+              : OverviewPage(db: db)),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -59,7 +98,11 @@ class DashboardPage extends StatefulWidget {
   final Database db;
   final bool debugAddSheet;
   final int initialProfileId; // which pile was tapped on the Overview
-  const DashboardPage({super.key, required this.db, this.debugAddSheet = false, this.initialProfileId = 0});
+  /// Demo mode (JOOSBOOKS_DEMO=1): auto-open the edit sheet on the first
+  /// entry ~800ms after load, so screenshots can capture it without
+  /// synthetic clicks (which never land in Flutter from the driver).
+  final bool demoAutoEdit;
+  const DashboardPage({super.key, required this.db, this.debugAddSheet = false, this.initialProfileId = 0, this.demoAutoEdit = false});
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
@@ -71,6 +114,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Map<String, double>? summary;
   String? monthLine;
   List<Map<String, Object?>> entries = [];
+  bool _demoFired = false;
 
   @override
   void initState() {
@@ -79,6 +123,30 @@ class _DashboardPageState extends State<DashboardPage> {
     if (widget.debugAddSheet) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Future.delayed(const Duration(milliseconds: 600), _openAdd);
+      });
+    }
+    if (widget.demoAutoEdit) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final demoMode = Platform.environment['JOOSBOOKS_DEMO'];
+        // DEMO=2 → stay on the list (no auto-edit) so the row chrome can be
+        // screenshotted. DEMO=3 → auto-swipe the first row to capture the
+        // delete + undo snackbar flow without synthetic clicks.
+        if (demoMode == '2') return;
+        if (demoMode == '3') {
+          Future.delayed(const Duration(milliseconds: 1200), () async {
+            await _refresh();
+            if (!mounted || entries.isEmpty || _demoFired) return;
+            _demoFired = true;
+            _deleteWithUndo(Map<String, Object?>.from(entries.first));
+          });
+          return;
+        }
+        Future.delayed(const Duration(milliseconds: 800), () async {
+          await _refresh();
+          if (!mounted || entries.isEmpty || _demoFired) return;
+          _demoFired = true;
+          _openEdit(Map<String, Object?>.from(entries.first));
+        });
       });
     }
   }
@@ -97,6 +165,10 @@ class _DashboardPageState extends State<DashboardPage> {
       if (r['kind'] == 'in') { income += cents / 100; } else { expenses += cents / 100; }
     }
     final profit = income - expenses;
+    // Mounted guard: _refresh can complete after the page is disposed
+    // (e.g. undo-callback firing late, or the user popping the page while a
+    // query is in flight). setState on a defunct State throws.
+    if (!mounted) return;
     setState(() {
       summary = {
         'income': income, 'expenses': expenses,
@@ -127,11 +199,6 @@ class _DashboardPageState extends State<DashboardPage> {
       if (pr['id'] == pid) return pr['name'] as String;
     }
     return 'Personal';
-  }
-
-  Future<void> _delete(int id) async {
-    await widget.db.delete('entries', where: 'id = ?', whereArgs: [id]);
-    _refresh();
   }
 
   Future<void> _renameProfile(int pid) async {
@@ -220,6 +287,54 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (_) => AddEntrySheet(db: widget.db, profileId: profileId),
     );
     _refresh();
+  }
+
+  /// Tap an entry row → the same sheet in edit mode (prefilled, saves in
+  /// place). One sheet for add + edit keeps the entry form in one place.
+  Future<void> _openEdit(Map<String, Object?> entry) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: kSurface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => AddEntrySheet(db: widget.db, entry: entry),
+    );
+    _refresh();
+  }
+
+  /// Delete with undo: the row leaves the UI synchronously (Dismissible's
+  /// contract — onDismissed requires the item gone from the tree immediately,
+  /// or the framework throws), then the DB delete + summary refresh run in
+  /// the background. UNDO re-inserts the identical row (id included).
+  void _deleteWithUndo(Map<String, Object?> entry) {
+    final id = entry['id'] as int;
+    if (!mounted) return;
+    // entries comes from db.query (unmodifiable) — rebind a filtered copy
+    // instead of removeWhere (read-only list throws).
+    setState(() =>
+        entries = entries.where((e) => e['id'] != id).toList());
+    // No hideCurrentSnackBar here: ScaffoldMessenger QUEUES snackbars, so
+    // rapid multi-deletes keep every row's UNDO reachable (forced replace
+    // would orphan earlier deletes permanently — QA4).
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Entry deleted',
+            style: TextStyle(color: kText)),
+        backgroundColor: kSurface2,
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'UNDO',
+          textColor: kGold,
+          onPressed: () async {
+            await widget.db.insert('entries', entry);
+            if (mounted) _refresh();
+          },
+        ),
+      ));
+    () async {
+      await widget.db.delete('entries', where: 'id = ?', whereArgs: [id]);
+      _refresh();
+    }();
   }
 
   Future<void> _openProfilePopover() async {
@@ -458,9 +573,27 @@ class _DashboardPageState extends State<DashboardPage> {
                             final t = DateTime.fromMillisecondsSinceEpoch((r['ts'] as int) * 1000);
                             final isIn = r['kind'] == 'in';
                             final v = (r['amount_cents'] as int) / 100;
-                            return ListTile(
+                            // Swipe left to delete (undoable); tap to edit.
+                            return Dismissible(
+                              key: ValueKey('entry-${r['id']}'),
+                              direction: DismissDirection.endToStart,
+                              onDismissed: (_) =>
+                                  _deleteWithUndo(Map<String, Object?>.from(r)),
+                              background: Container(
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 16),
+                                color: kRed.withValues(alpha: 0.25),
+                                child: const Icon(Icons.delete_outline,
+                                    color: kRed),
+                              ),
+                              // Own Material so ink splashes paint above the
+                              // decorated container's background (assertion).
+                              child: Material(
+                                type: MaterialType.transparency,
+                                child: ListTile(
                               dense: true,
-                              contentPadding: EdgeInsets.zero,
+                              onTap: () =>
+                                  _openEdit(Map<String, Object?>.from(r)),
                               leading: Text(DateFormat('MMM d').format(t),
                                   style: const TextStyle(color: kTextDim)),
                               title: Text('${isIn ? "🟢" : "🔴"} ${r['category']}',
@@ -469,13 +602,10 @@ class _DashboardPageState extends State<DashboardPage> {
                                   ? null
                                   : Text('"${r['note']}"',
                                       style: const TextStyle(fontSize: 12, color: kTextDim)),
-                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Text(isIn ? '+\$${v.toStringAsFixed(2)}' : '-\$${v.toStringAsFixed(2)}',
-                                    style: TextStyle(color: isIn ? kGreen : kRed, fontWeight: FontWeight.bold)),
-                                IconButton(
-                                    icon: const Icon(Icons.close, size: 16, color: kTextDim),
-                                    onPressed: () => _delete(r['id'] as int)),
-                              ]),
+                              trailing: Text(isIn ? '+\$${v.toStringAsFixed(2)}' : '-\$${v.toStringAsFixed(2)}',
+                                  style: TextStyle(color: isIn ? kGreen : kRed, fontWeight: FontWeight.bold)),
+                            ),
+                            ),
                             );
                           }),
                 ),
@@ -521,7 +651,11 @@ class _DashboardPageState extends State<DashboardPage> {
 class AddEntrySheet extends StatefulWidget {
   final Database db;
   final int profileId; // preset from the dashboard's selected pile
-  const AddEntrySheet({super.key, required this.db, this.profileId = 0});
+  /// Existing entry being edited (tap-a-row-to-edit). Null = new-entry mode.
+  /// When set, all fields prefill from the row and Save UPDATEs in place.
+  final Map<String, Object?>? entry;
+  const AddEntrySheet({super.key, required this.db, this.profileId = 0, this.entry});
+  bool get isEdit => entry != null;
   @override
   State<AddEntrySheet> createState() => _AddEntrySheetState();
 }
@@ -533,6 +667,10 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   int profileId = 0;
   List<Map<String, Object?>> profiles = [];
   final noteCtrl = TextEditingController();
+  // Edit mode: the first digit tap REPLACES the prefilled amount instead of
+  // appending (the 2-decimal guard would otherwise swallow every digit of a
+  // prefilled "25.50"). Standard keypad/POS behavior; cleared by ⌫ or '.'.
+  bool _replaceOnFirstDigit = false;
   // Date of the transaction — defaults to today, tappable to change. Stored
   // at LOCAL NOON so year/month bucketing never shifts a day across midnight
   // or DST edges.
@@ -542,6 +680,23 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
   void initState() {
     super.initState();
     profileId = widget.profileId;
+    // Edit mode: prefill every field from the existing row.
+    final e = widget.entry;
+    if (e != null) {
+      kind = e['kind'] as String? ?? 'in';
+      category = e['category'] as String? ?? 'Other';
+      profileId = e['profile_id'] as int? ?? 0;
+      final ts = e['ts'] as int;
+      // Rows are stored at local noon; strip to the date for the picker.
+      final t = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+      entryDate = DateTime(t.year, t.month, t.day, 12);
+      final cents = e['amount_cents'] as int;
+      amountText = (cents % 100 == 0)
+          ? (cents ~/ 100).toString()
+          : (cents / 100).toStringAsFixed(2);
+      noteCtrl.text = e['note'] as String? ?? '';
+      _replaceOnFirstDigit = true;
+    }
     _loadProfiles();
   }
 
@@ -554,9 +709,19 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
     setState(() {
       if (k == '⌫') {
         if (amountText.isNotEmpty) amountText = amountText.substring(0, amountText.length - 1);
+        _replaceOnFirstDigit = false;
       } else if (k == '.') {
         if (!amountText.contains('.')) amountText += '.';
+        _replaceOnFirstDigit = false;
       } else if (amountText.length < 9) {
+        // First digit on a prefilled amount starts a fresh number — must run
+        // BEFORE the 2-decimal guard, which would otherwise swallow every
+        // digit typed over a prefilled "25.50" (3 chars after the dot).
+        if (_replaceOnFirstDigit) {
+          _replaceOnFirstDigit = false;
+          amountText = k;
+          return;
+        }
         if (amountText.contains('.') && amountText.length - amountText.indexOf('.') > 2) return;
         amountText += k;
       }
@@ -568,12 +733,19 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
     if (amount <= 0) return;
     final ts = DateTime(entryDate.year, entryDate.month, entryDate.day, 12)
         .millisecondsSinceEpoch ~/ 1000;
-    await widget.db.insert('entries', {
+    final values = {
       'ts': ts,
       'amount_cents': (amount * 100).round(),
       'kind': kind, 'category': category, 'note': noteCtrl.text,
       'profile_id': profileId,
-    });
+    };
+    if (widget.isEdit) {
+      // Update in place — the entry keeps its row id.
+      await widget.db.update('entries', values,
+          where: 'id = ?', whereArgs: [widget.entry!['id'] as int]);
+    } else {
+      await widget.db.insert('entries', values);
+    }
     if (mounted) Navigator.pop(context);
   }
 
@@ -585,6 +757,14 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           bottom: MediaQuery.of(context).viewInsets.bottom + 16),
       child: SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Edit mode gets a title; new-entry mode stays visually identical
+        // to before (no heading).
+        if (widget.isEdit) ...[
+          Align(alignment: Alignment.centerLeft,
+              child: Text('Edit entry',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kGold))),
+          const SizedBox(height: 10),
+        ],
         // Date row: default today, tap to change (click-driven; no keyboard).
         Align(alignment: Alignment.centerLeft,
             child: Text('Date:',
@@ -713,7 +893,8 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           child: FilledButton(
             style: FilledButton.styleFrom(backgroundColor: kGold, foregroundColor: const Color(0xFF141210)),
             onPressed: _save,
-            child: const Text('Save entry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            child: Text(widget.isEdit ? 'Save changes' : 'Save entry',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ),
         const SizedBox(height: 6),
